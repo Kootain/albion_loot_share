@@ -1,0 +1,5 @@
+{
+  "name": "Albion Loot Distributor",
+  "description": "A tool to evenly distribute loot among players in Albion Online with a cool shuffling animation.",
+  "requestFramePermissions": []
+}
