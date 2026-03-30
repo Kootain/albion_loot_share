@@ -8,6 +8,13 @@ interface Player {
   name: string;
 }
 
+const generateId = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return Date.now().toString(36) + Math.random().toString(36).substring(2);
+};
+
 const ShuffleAnimation = ({ players }: { players: Player[] }) => {
   const [currentName, setCurrentName] = useState(players[0]?.name || '');
 
@@ -67,7 +74,7 @@ export default function App() {
         if (jsonStr) {
           const data = JSON.parse(jsonStr);
           if (data && typeof data.t === 'number' && Array.isArray(data.n)) {
-            const loadedPlayers = data.n.map((name: string) => ({ id: crypto.randomUUID(), name }));
+            const loadedPlayers = data.n.map((name: string) => ({ id: generateId(), name }));
             setPlayers(loadedPlayers);
             setShuffledPlayers(loadedPlayers);
             setTotalLoot(data.t);
@@ -82,7 +89,7 @@ export default function App() {
 
   const handleBatchImport = () => {
     const names = batchInput.split('\n').map(n => n.trim()).filter(n => n.length > 0);
-    const newPlayers = names.map(name => ({ id: crypto.randomUUID(), name }));
+    const newPlayers = names.map(name => ({ id: generateId(), name }));
     setPlayers(prev => [...prev, ...newPlayers]);
     setBatchInput('');
     setShowResults(false);
@@ -92,7 +99,7 @@ export default function App() {
   const handleAddPlayer = (e?: React.FormEvent) => {
     e?.preventDefault();
     if (newPlayerName.trim()) {
-      setPlayers(prev => [...prev, { id: crypto.randomUUID(), name: newPlayerName.trim() }]);
+      setPlayers(prev => [...prev, { id: generateId(), name: newPlayerName.trim() }]);
       setNewPlayerName('');
       setShowResults(false);
     }
@@ -164,7 +171,20 @@ export default function App() {
   };
 
   const handleCopyLink = () => {
-    navigator.clipboard.writeText(window.location.href);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(window.location.href);
+    } else {
+      const textArea = document.createElement("textarea");
+      textArea.value = window.location.href;
+      document.body.appendChild(textArea);
+      textArea.select();
+      try {
+        document.execCommand('copy');
+      } catch (err) {
+        console.error('Failed to copy', err);
+      }
+      document.body.removeChild(textArea);
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -226,6 +246,7 @@ export default function App() {
                 </h2>
                 <div className="flex items-center gap-2">
                   <button 
+                    type="button"
                     onClick={() => setIsBatchModalOpen(true)}
                     className="text-xs text-amber-500 hover:text-amber-400 px-3 py-1 rounded bg-amber-500/10 hover:bg-amber-500/20 transition-colors flex items-center gap-1"
                   >
@@ -234,6 +255,7 @@ export default function App() {
                   </button>
                   {players.length > 0 && (
                     <button 
+                      type="button"
                       onClick={clearAll}
                       className="text-xs text-red-400 hover:text-red-300 px-3 py-1 rounded bg-red-400/10 hover:bg-red-400/20 transition-colors"
                     >
