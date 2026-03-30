@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Trash2, Edit2, Plus, Users, Coins, Sparkles, Check, X, Upload, RefreshCw, Share2 } from 'lucide-react';
+import { Trash2, Edit2, Plus, Users, Coins, Sparkles, Check, X, Upload, RefreshCw, Share2, Gift } from 'lucide-react';
 import LZString from 'lz-string';
 
 interface Player {
@@ -8,7 +8,22 @@ interface Player {
   name: string;
 }
 
+interface LuckyPrizeConfig {
+  id: string;
+  name: string;
+  count: number;
+}
+
+interface LuckyPrizeResult {
+  prizeId: string;
+  prizeName: string;
+  winners: Player[];
+}
+
 const generateId = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
   return Date.now().toString(36) + Math.random().toString(36).substring(2);
 };
 
@@ -54,6 +69,8 @@ export default function App() {
   const [editName, setEditName] = useState('');
   
   const [totalLoot, setTotalLoot] = useState<number | ''>('');
+  const [luckyPrizes, setLuckyPrizes] = useState<LuckyPrizeConfig[]>([]);
+  const [luckyResults, setLuckyResults] = useState<LuckyPrizeResult[]>([]);
   
   const [isDistributing, setIsDistributing] = useState(false);
   const [showResults, setShowResults] = useState(false);
@@ -75,6 +92,17 @@ export default function App() {
             setPlayers(loadedPlayers);
             setShuffledPlayers(loadedPlayers);
             setTotalLoot(data.t);
+            
+            if (data.lp) setLuckyPrizes(data.lp);
+            if (data.lr) {
+              const loadedResults = data.lr.map((r: any) => ({
+                prizeId: r.prizeId,
+                prizeName: r.prizeName,
+                winners: r.winners.map((name: string) => loadedPlayers.find((p: Player) => p.name === name) || { id: generateId(), name })
+              }));
+              setLuckyResults(loadedResults);
+            }
+            
             setShowResults(true);
           }
         }
@@ -143,6 +171,21 @@ export default function App() {
     const shuffled = [...players].sort(() => Math.random() - 0.5);
     setShuffledPlayers(shuffled);
     
+    // Calculate lucky winners
+    const luckyDrawPool = [...shuffled].sort(() => Math.random() - 0.5);
+    const newLuckyResults: LuckyPrizeResult[] = [];
+    
+    luckyPrizes.forEach(prize => {
+      const winners = luckyDrawPool.splice(0, prize.count);
+      newLuckyResults.push({
+        prizeId: prize.id,
+        prizeName: prize.name,
+        winners
+      });
+    });
+    
+    setLuckyResults(newLuckyResults);
+    
     setTimeout(() => {
       setIsDistributing(false);
       setShowResults(true);
@@ -150,7 +193,13 @@ export default function App() {
       // Update URL with compressed results
       const dataToShare = {
         t: totalLoot,
-        n: shuffled.map(p => p.name)
+        n: shuffled.map(p => p.name),
+        lp: luckyPrizes,
+        lr: newLuckyResults.map(r => ({
+          prizeId: r.prizeId,
+          prizeName: r.prizeName,
+          winners: r.winners.map(w => w.name)
+        }))
       };
       const compressed = LZString.compressToEncodedURIComponent(JSON.stringify(dataToShare));
       const newUrl = `${window.location.pathname}?d=${compressed}`;
@@ -377,6 +426,60 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* Lucky Prizes */}
+                <div className="space-y-3 pt-4 border-t border-zinc-800/50">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-sm font-medium text-zinc-400 flex items-center gap-1.5">
+                      <Gift className="w-4 h-4" />
+                      幸运儿配置
+                    </label>
+                    <button
+                      onClick={() => setLuckyPrizes(prev => [...prev, { id: generateId(), name: '', count: 1 }])}
+                      className="text-xs text-amber-500 hover:text-amber-400 flex items-center gap-1 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-1 rounded transition-colors"
+                    >
+                      <Plus className="w-3 h-3" />
+                      添加奖项
+                    </button>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    {luckyPrizes.length > 0 && (
+                      <div className="flex items-center gap-2 px-1 pb-1">
+                        <div className="flex-1 text-xs font-medium text-zinc-500">奖项</div>
+                        <div className="w-20 text-xs font-medium text-zinc-500">数量</div>
+                        <div className="w-[34px]"></div>
+                      </div>
+                    )}
+                    {luckyPrizes.map((prize) => (
+                      <div key={prize.id} className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={prize.name}
+                          onChange={(e) => setLuckyPrizes(prev => prev.map(p => p.id === prize.id ? { ...p, name: e.target.value } : p))}
+                          placeholder="奖项名称 (如: 坐骑)"
+                          className="flex-1 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:border-amber-500/50"
+                        />
+                        <input
+                          type="number"
+                          min="1"
+                          value={prize.count}
+                          onChange={(e) => setLuckyPrizes(prev => prev.map(p => p.id === prize.id ? { ...p, count: parseInt(e.target.value) || 1 } : p))}
+                          className="w-20 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:border-amber-500/50"
+                        />
+                        <button
+                          onClick={() => setLuckyPrizes(prev => prev.filter(p => p.id !== prize.id))}
+                          className="p-2 text-zinc-500 hover:text-red-400 transition-colors bg-zinc-950 border border-zinc-800 rounded-lg hover:border-red-400/30"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                    {luckyPrizes.length === 0 && (
+                      <div className="text-xs text-zinc-600 italic text-center py-2 bg-zinc-950/50 rounded-lg border border-zinc-800/50 border-dashed">暂无幸运儿奖项，点击右上角添加</div>
+                    )}
+                  </div>
+                </div>
+
                 <button
                   onClick={handleDistribute}
                   disabled={players.length === 0 || !totalLoot || totalLoot <= 0 || isDistributing}
@@ -439,6 +542,37 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Lucky Winners Section */}
+              {luckyResults.length > 0 && luckyResults.some(r => r.winners.length > 0) && (
+                <div className="mb-8 space-y-4">
+                  <h3 className="text-xl font-bold text-amber-500 flex items-center gap-2">
+                    <Gift className="w-5 h-5" />
+                    幸运儿名单
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {luckyResults.map(result => result.winners.length > 0 && (
+                      <div key={result.prizeId} className="bg-zinc-950 border border-zinc-800 rounded-xl p-4">
+                        <div className="text-amber-500 font-bold mb-3 pb-2 border-b border-zinc-800/50 flex items-center justify-between">
+                          <span>{result.prizeName || '未命名奖项'}</span>
+                          <span className="text-xs font-normal text-zinc-500">{result.winners.length} 人</span>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {result.winners.map(winner => (
+                            <span key={winner.id} className="bg-amber-500/10 text-amber-500 border border-amber-500/20 px-3 py-1 rounded-full text-sm font-medium">
+                              {winner.name}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <h3 className="text-xl font-bold text-zinc-300 flex items-center gap-2 mb-4">
+                <Coins className="w-5 h-5" />
+                均分 Loot 名单
+              </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {shuffledPlayers.map((player, index) => {
                   const isDistributed = distributedIds.has(player.id);
@@ -459,7 +593,7 @@ export default function App() {
                         <div className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center font-bold font-mono text-sm ${
                           isDistributed
                             ? 'bg-zinc-800 text-zinc-500'
-                            : index < 3 ? 'bg-amber-500/20 text-amber-500' : 'bg-zinc-800 text-zinc-400'
+                            : 'bg-zinc-800 text-zinc-400'
                         }`}>
                           {index + 1}
                         </div>
