@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Trash2, Edit2, Plus, Users, Coins, Sparkles, Check, X, Upload, RefreshCw, Share2, Gift } from 'lucide-react';
+import { Trash2, Edit2, Plus, Users, Coins, Sparkles, Check, X, Upload, RefreshCw, Share2, Gift, Image as ImageIcon, Loader2 } from 'lucide-react';
 import LZString from 'lz-string';
+import { GoogleGenAI, Type } from "@google/genai";
 
 interface Player {
   id: string;
@@ -76,6 +77,9 @@ export default function App() {
   const [showResults, setShowResults] = useState(false);
   const [shuffledPlayers, setShuffledPlayers] = useState<Player[]>([]);
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
+  const [isProcessingImage, setIsProcessingImage] = useState(false);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [copied, setCopied] = useState(false);
   const [distributedIds, setDistributedIds] = useState<Set<string>>(new Set());
 
@@ -119,6 +123,84 @@ export default function App() {
     setBatchInput('');
     setShowResults(false);
     setIsBatchModalOpen(false);
+    setImagePreview(null);
+  };
+
+  const processImage = async (file: File) => {
+    if (!file.type.startsWith('image/')) return;
+    
+    setIsProcessingImage(true);
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const base64Data = e.target?.result as string;
+      setImagePreview(base64Data);
+      
+      try {
+        const ai = new GoogleGenAI({ 
+          apiKey: process.env.GEMINI_API_KEY,
+          httpOptions: {
+            baseUrl: 'https://gemini.albionbox.com/', // 替换为你自己搭建的代理域名
+          }
+        } as any);
+        const response = await ai.models.generateContent({
+          model: "gemini-3-flash-preview",
+          contents: [
+            {
+              inlineData: {
+                data: base64Data.split(',')[1],
+                mimeType: file.type,
+              },
+            },
+            {
+              text: "请识别这张图片中的所有人名。请注意：1. 必须识别出所有人，不要遗漏任何一个。2. 名字拼写如果有轻微错误（错一两个字母）是可以接受的，但人数必须准确。3. 请直接返回名字列表，每行一个名字，不要有任何其他文字。",
+            },
+          ],
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                names: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING },
+                  description: "List of player names found in the image"
+                }
+              },
+              required: ["names"]
+            }
+          }
+        });
+
+        const result = JSON.parse(response.text || '{"names":[]}');
+        if (result.names && result.names.length > 0) {
+          setBatchInput(prev => {
+            const existing = prev.trim();
+            return existing ? `${existing}\n${result.names.join('\n')}` : result.names.join('\n');
+          });
+        }
+      } catch (error) {
+        console.error("AI processing failed:", error);
+      } finally {
+        setIsProcessingImage(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData.items;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        const file = items[i].getAsFile();
+        if (file) processImage(file);
+        break;
+      }
+    }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) processImage(file);
   };
 
   const handleAddPlayer = (e?: React.FormEvent) => {
@@ -639,28 +721,83 @@ export default function App() {
                   批量导入玩家
                 </h2>
                 <button 
-                  onClick={() => setIsBatchModalOpen(false)}
+                  onClick={() => {
+                    setIsBatchModalOpen(false);
+                    setImagePreview(null);
+                  }}
                   className="text-zinc-400 hover:text-white p-1 rounded-md hover:bg-zinc-800 transition-colors"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              <textarea
-                value={batchInput}
-                onChange={(e) => setBatchInput(e.target.value)}
-                placeholder="在此粘贴玩家名单，每行一个名字..."
-                className="w-full h-48 bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50 transition-all resize-none font-mono text-sm"
-              />
+
+              <div className="space-y-4">
+                <div 
+                  onPaste={handlePaste}
+                  className="relative group"
+                >
+                  <textarea
+                    value={batchInput}
+                    onChange={(e) => setBatchInput(e.target.value)}
+                    placeholder="在此粘贴玩家名单，或直接在此粘贴图片识别..."
+                    className="w-full h-48 bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50 transition-all resize-none font-mono text-sm"
+                  />
+                  <div className="absolute bottom-3 right-3 flex items-center gap-2">
+                    <input 
+                      type="file" 
+                      ref={fileInputRef}
+                      onChange={handleFileSelect}
+                      accept="image/*"
+                      className="hidden"
+                    />
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="p-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white rounded-lg transition-colors flex items-center gap-2 text-xs"
+                      title="上传图片识别"
+                    >
+                      <ImageIcon className="w-4 h-4" />
+                      图片导入
+                    </button>
+                  </div>
+                  {isProcessingImage && (
+                    <div className="absolute inset-0 bg-zinc-950/60 backdrop-blur-[2px] rounded-xl flex flex-col items-center justify-center text-amber-500 gap-3">
+                      <Loader2 className="w-8 h-8 animate-spin" />
+                      <span className="text-sm font-medium">AI 正在识别名单...</span>
+                    </div>
+                  )}
+                </div>
+
+                {imagePreview && (
+                  <div className="relative w-full aspect-video bg-zinc-950 rounded-xl border border-zinc-800 overflow-hidden group">
+                    <img src={imagePreview} alt="Preview" className="w-full h-full object-contain" />
+                    <button 
+                      onClick={() => setImagePreview(null)}
+                      className="absolute top-2 right-2 p-1.5 bg-zinc-900/80 text-zinc-400 hover:text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+
+                <div className="text-sm text-zinc-400 flex items-center gap-2 px-3 py-2 bg-zinc-800/40 rounded-xl border border-zinc-800/50">
+                  <Sparkles className="w-4 h-4 text-amber-500" />
+                  <span>提示：您可以直接在输入框内使用 <kbd className="bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-200 font-mono text-xs border border-zinc-700">Ctrl+V</kbd> 粘贴截图进行识别</span>
+                </div>
+              </div>
+
               <div className="mt-6 flex justify-end gap-3">
                 <button
-                  onClick={() => setIsBatchModalOpen(false)}
+                  onClick={() => {
+                    setIsBatchModalOpen(false);
+                    setImagePreview(null);
+                  }}
                   className="px-5 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg font-medium transition-colors"
                 >
                   取消
                 </button>
                 <button
                   onClick={handleBatchImport}
-                  disabled={!batchInput.trim()}
+                  disabled={!batchInput.trim() || isProcessingImage}
                   className="px-5 py-2.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors flex items-center gap-2"
                 >
                   <Plus className="w-4 h-4" />
